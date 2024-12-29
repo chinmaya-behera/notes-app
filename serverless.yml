@@ -1,32 +1,157 @@
-# NOTE: update this with your service name
-service: serverless-nodejs-starter
-
-# Create an optimized package for our functions 
-package:
-  individually: true
-
-plugins:
-  - serverless-bundle # Package our functions with Webpack
-  - serverless-offline
-  - serverless-dotenv-plugin # Load .env as environment variables
+service: notes-app
 
 provider:
   name: aws
-  runtime: nodejs22.x
-  stage: prod
+  runtime: nodejs16.x
   region: us-east-1
-  # To load environment variables externally
-  # rename env.example to .env and uncomment
-  # the following line. Also, make sure to not
-  # commit your .env.
-  #
-  #environment:
-  #  SAMPLE_ENV_VAR: ${env:SAMPLE_ENV_VAR}
+  environment:
+    USER_TABLE: ${self:service}-users
+    NOTES_TABLE: ${self:service}-notes
+    COGNITO_USER_POOL_ID: !Ref UserPool
+    COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - cognito-idp:AdminInitiateAuth
+        - cognito-idp:AdminCreateUser
+        - cognito-idp:AdminGetUser
+        - cognito-idp:AdminUpdateUserAttributes
+        - cognito-idp:AdminDeleteUser
+        - dynamodb:PutItem
+        - dynamodb:GetItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+      Resource: 
+        - arn:aws:dynamodb:us-east-1:713881816751:table/${self:service}-notes
+        - arn:aws:dynamodb:us-east-1:713881816751:table/${self:service}-users
+        - arn:aws:cognito-idp:us-east-1:713881816751:userpool/us-east-1_Z9UFS4WNL
+
+resources:
+  Resources:
+    UserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: NotesAppUserPool
+        AliasAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+
+    UserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        UserPoolId: !Ref UserPool
+        ClientName: NotesAppClient
+        GenerateSecret: false
+        AllowedOAuthFlows:
+          - implicit
+          - code
+        CallbackURLs:
+          - https://yourapp.com/callback
+          - http://localhost:3000/callback
+        AllowedOAuthScopes:
+          - email
+          - openid
+          - profile
+        SupportedIdentityProviders:
+          - COGNITO
+        ExplicitAuthFlows:
+          - ADMIN_NO_SRP_AUTH
+          - USER_PASSWORD_AUTH
+
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-users
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    NotesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-notes
+        AttributeDefinitions:
+          - AttributeName: noteId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: noteId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
 
 functions:
-  hello:
-    handler: handler.hello
+  cognitoAuthorizer:
+    handler: handler.cognitoAuthorizer
     events:
       - http:
-          path: hello
+          path: authorizer
+          method: post
+          cors: true
+
+  signup:
+    handler: handler.signup
+    events:
+      - http:
+          path: signup
+          method: post
+          cors: true
+
+  login:
+    handler: handler.login
+    events:
+      - http:
+          path: login
+          method: post
+          cors: true
+
+  createNote:
+    handler: create.create
+    events:
+      - http:
+          path: notes
+          method: post
+          cors: true
+          # authorizer: 
+          #   name: cognitoAuthorizer
+
+  getNotes:
+    handler: list.list
+    events:
+      - http:
+          path: notes
           method: get
+          cors: true
+          authorizer: 
+            name: cognitoAuthorizer
+
+  updateNote:
+    handler: update.update
+    events:
+      - http:
+          path: notes/{id}
+          method: put
+          cors: true
+          authorizer: 
+            name: cognitoAuthorizer
+
+  deleteNote:
+    handler: delete.delete
+    events:
+      - http:
+          path: notes/{id}
+          method: delete
+          cors: true
+          authorizer: 
+            name: cognitoAuthorizer
+
+  resetPassword:
+    handler: handler.resetPassword
+    events:
+      - http:
+          path: resetPassword
+          method: post
+          cors: true
